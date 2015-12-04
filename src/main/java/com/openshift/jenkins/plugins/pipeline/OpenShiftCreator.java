@@ -31,7 +31,9 @@ import java.io.Serializable;
 import java.net.MalformedURLException;
 import java.net.SocketTimeoutException;
 import java.net.URL;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import jenkins.tasks.SimpleBuildStep;
 
