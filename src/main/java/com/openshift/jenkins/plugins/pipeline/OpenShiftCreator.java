@@ -1,4 +1,5 @@
 package com.openshift.jenkins.plugins.pipeline;
+import hudson.EnvVars;
 import hudson.FilePath;
 import hudson.Launcher;
 import hudson.Extension;
@@ -28,10 +29,14 @@ import javax.servlet.ServletException;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.lang.reflect.Field;
 import java.net.MalformedURLException;
 import java.net.SocketTimeoutException;
 import java.net.URL;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
 
 import jenkins.tasks.SimpleBuildStep;
 
@@ -43,6 +48,46 @@ public class OpenShiftCreator extends Builder implements SimpleBuildStep, Serial
     private String verbose = "false";
     private String jsonyaml = "";
     
+    private static final Map<String, String[]> apiMap;
+    static
+    {
+        String api = "/api";
+        String oapi = "/oapi";
+
+        // OpenShift API endpoints
+        apiMap = new HashMap<String, String[]>();
+    	apiMap.put("BuildConfig", new String[]{oapi, "buildconfigs"});
+    	apiMap.put("Build", new String[]{oapi, "builds"});
+    	apiMap.put("DeploymentConfigRollback", new String[]{oapi, "deploymentconfigrollbacks"});
+    	apiMap.put("DeploymentConfig", new String[]{oapi, "deploymentconfigs"});
+    	apiMap.put("ImageStreamMapping", new String[]{oapi, "imagestreammappings"});
+    	apiMap.put("ImageStream", new String[]{oapi, "imagestreams"});
+    	apiMap.put("LocalResourceAccessReview", new String[]{oapi, "localresourceaccessreviews"});
+    	apiMap.put("LocalSubjectAccessReview", new String[]{oapi, "localsubjectaccessreviews"});
+    	apiMap.put("Policy", new String[]{oapi, "policies"});
+    	apiMap.put("PolicyBinding", new String[]{oapi, "policybindings"});
+    	//apiMap.put("Template", new String[]{oapi, "processedtemplates"}); // Different from templates?
+    	apiMap.put("ResourceAccessReview", new String[]{oapi, "resourceaccessreviews"});
+    	apiMap.put("RoleBinding", new String[]{oapi, "rolebindings"});
+    	apiMap.put("Role", new String[]{oapi, "roles"});
+    	apiMap.put("Route", new String[]{oapi, "routes"});
+    	apiMap.put("SubjectAccessReview", new String[]{oapi, "subjectaccessreviews"});
+    	apiMap.put("Template", new String[]{oapi, "templates"});
+
+        // Kubernetes API endpoints
+    	apiMap.put("Binding", new String[]{api, "bindings"});
+    	apiMap.put("Endpoint", new String[]{api, "endpoints"});
+    	apiMap.put("Event", new String[]{api, "events"});
+    	apiMap.put("LimitRange", new String[]{api, "limitranges"});
+    	apiMap.put("PersistentVolumeClaim", new String[]{api, "persistentvolumeclaims"});
+    	apiMap.put("Pod", new String[]{api, "pods"});
+    	apiMap.put("PodTemplate", new String[]{api, "podtemplates"});
+    	apiMap.put("ReplicationController", new String[]{api, "replicationcontrollers"});
+    	apiMap.put("ResourceQuota", new String[]{api, "resourcequotas"});
+    	apiMap.put("Secret", new String[]{api, "secrets"});
+    	apiMap.put("ServiceAccount", new String[]{api, "serviceaccounts"});
+    	apiMap.put("Service", new String[]{api, "services"});
+    }
     
     // Fields in config.jelly must match the parameter names in the "DataBoundConstructor"
     @DataBoundConstructor
@@ -81,8 +126,13 @@ public class OpenShiftCreator extends Builder implements SimpleBuildStep, Serial
 		String response = null;
 		URL url = null;
     	try {
+<<<<<<< HEAD
     		if (chatty) listener.getLogger().println("\nOpenShiftCreator PUT URI " + (path.equals("service") ? "/api" : "/oapi") + "/v1/namespaces/"+namespace+"/"+path+"s");
 			url = new URL(apiURL + (path.equals("service") ? "/api" : "/oapi") + "/v1/namespaces/" + namespace + "/" + path + "s");
+=======
+    		if (chatty) listener.getLogger().println("\nOpenShiftCreator POST URI " + apiMap.get(path)[0] + "/v1/namespaces/" +namespace + "/" + apiMap.get(path)[1]);
+			url = new URL(apiURL + apiMap.get(path)[0] + "/v1/namespaces/" + namespace + "/" + apiMap.get(path)[1]);
+>>>>>>> upstream/master
 		} catch (MalformedURLException e1) {
 			e1.printStackTrace(listener.getLogger());
 			return false;
@@ -96,7 +146,7 @@ public class OpenShiftCreator extends Builder implements SimpleBuildStep, Serial
 		try {
 	    	KubernetesResource kr = new KubernetesResource(resource, client, null);
 			response = urlClient.post(url, 10 * 1000, kr);
-			if (chatty) listener.getLogger().println("\nOpenShiftCreator REST PUT response " + response);
+			if (chatty) listener.getLogger().println("\nOpenShiftCreator REST POST response " + response);
 		} catch (SocketTimeoutException e1) {
 			if (chatty) e1.printStackTrace(listener.getLogger());
     		listener.getLogger().println("\n\n OpenShiftCreator BUILD STEP EXIT:  socket timeout");
@@ -110,38 +160,108 @@ public class OpenShiftCreator extends Builder implements SimpleBuildStep, Serial
 		return true;
     }
     
+	// unfortunately a base class would not have access to private fields in this class; could munge our way through
+	// inspecting the methods and try to match field names and methods starting with get/set ... seems problematic;
+	// for now, duplicating this small piece of logic in each build step is the path taken
+	protected HashMap<String,String> inspectBuildEnvAndOverrideFields(AbstractBuild build, TaskListener listener, boolean chatty) {
+		String className = this.getClass().getName();
+		HashMap<String,String> overridenFields = new HashMap<String,String>();
+		try {
+			EnvVars env = build.getEnvironment(listener);
+			if (env == null)
+				return overridenFields;
+			Class<?> c = Class.forName(className);
+			Field[] fields = c.getDeclaredFields();
+			for (Field f : fields) {
+				String key = f.getName();
+				// the json field can show up as a Map 
+				Object val = f.get(this);
+				if (chatty)
+					listener.getLogger().println("inspectBuildEnvAndOverrideFields found field " + key + " with current value " + val);
+				if (val == null)
+					continue;
+				if (!(val instanceof String))
+					continue;
+				Object envval = env.get(val);
+				if (chatty)
+					listener.getLogger().println("inspectBuildEnvAndOverrideFields for field " + key + " got val from build env " + envval);
+				if (envval != null) {
+					f.set(this, envval);
+					overridenFields.put(f.getName(), (String)val);
+				}
+			}
+		} catch (ClassNotFoundException e1) {
+			e1.printStackTrace(listener.getLogger());
+		} catch (IOException e) {
+			e.printStackTrace(listener.getLogger());
+		} catch (InterruptedException e) {
+			e.printStackTrace(listener.getLogger());
+		} catch (IllegalArgumentException e) {
+			e.printStackTrace(listener.getLogger());
+		} catch (IllegalAccessException e) {
+			e.printStackTrace(listener.getLogger());
+		}
+		return overridenFields;
+	}
+	
+	protected void restoreOverridenFields(HashMap<String,String> overrides, TaskListener listener) {
+		String className = this.getClass().getName();
+		try {
+			Class<?> c = Class.forName(className);
+			for (Entry<String, String> entry : overrides.entrySet()) {
+				Field f = c.getDeclaredField(entry.getKey());
+				f.set(this, entry.getValue());
+			}
+		} catch (ClassNotFoundException e) {
+			e.printStackTrace(listener.getLogger());
+		} catch (NoSuchFieldException e) {
+			e.printStackTrace(listener.getLogger());
+		} catch (SecurityException e) {
+			e.printStackTrace(listener.getLogger());
+		} catch (IllegalArgumentException e) {
+			e.printStackTrace(listener.getLogger());
+		} catch (IllegalAccessException e) {
+			e.printStackTrace(listener.getLogger());
+		}
+	}
+	
     protected boolean coreLogic(AbstractBuild build, Launcher launcher, TaskListener listener) {
 		boolean chatty = Boolean.parseBoolean(verbose);
-    	listener.getLogger().println("\n\nBUILD STEP:  OpenShiftImageTagger in perform on namespace " + namespace);
-    	
-    	TokenAuthorizationStrategy bearerToken = new TokenAuthorizationStrategy(Auth.deriveBearerToken(build, authToken, listener, chatty));
-    	Auth auth = Auth.createInstance(chatty ? listener : null);
-    	    	
-    	ModelNode resources = ModelNode.fromJSONString(jsonyaml);
-    	    	
-    	//cycle through json and POST to appropriate resource
-    	String kind = resources.get("kind").asString();
-		UrlConnectionHttpClient urlClient = new UrlConnectionHttpClient(
-				null, "application/json", null, auth, null, null);
-		urlClient.setAuthorizationStrategy(bearerToken);
-		
-    	boolean success = false;
-    	if (kind.equalsIgnoreCase("List")) {
-    		List<ModelNode> list = resources.get("items").asList();
-    		for (ModelNode node : list) {
-    			String path = node.get("kind").asString().toLowerCase();
-    			success = this.makeRESTCall(chatty, listener, path, auth, urlClient, node);
-    			if (!success)
-    				break;
-    		}
-    	} else {
-    		String path = kind.toLowerCase();
-    		success = this.makeRESTCall(chatty, listener, path, auth, urlClient, resources);
-    	}
+		HashMap<String,String> overrides = inspectBuildEnvAndOverrideFields(build, listener, chatty);
+		try {
+	    	listener.getLogger().println("\n\nBUILD STEP:  OpenShiftImageTagger in perform on namespace " + namespace);
+	    	
+	    	TokenAuthorizationStrategy bearerToken = new TokenAuthorizationStrategy(Auth.deriveBearerToken(build, authToken, listener, chatty));
+	    	Auth auth = Auth.createInstance(chatty ? listener : null);
+	    	    	
+	    	ModelNode resources = ModelNode.fromJSONString(jsonyaml);
+	    	    	
+	    	//cycle through json and POST to appropriate resource
+	    	String kind = resources.get("kind").asString();
+			UrlConnectionHttpClient urlClient = new UrlConnectionHttpClient(
+					null, "application/json", null, auth, null, null);
+			urlClient.setAuthorizationStrategy(bearerToken);
+			
+	    	boolean success = false;
+	    	if (kind.equalsIgnoreCase("List")) {
+	    		List<ModelNode> list = resources.get("items").asList();
+	    		for (ModelNode node : list) {
+	    			String path = node.get("kind").asString();
+	    			success = this.makeRESTCall(chatty, listener, path, auth, urlClient, node);
+	    			if (!success)
+	    				break;
+	    		}
+	    	} else {
+	    		String path = kind;
+	    		success = this.makeRESTCall(chatty, listener, path, auth, urlClient, resources);
+	    	}
 
-    	if (success)
-    		listener.getLogger().println("\n\n OpenShiftCreator BUILD STEP EXIT:  resources(s) created");
-		return success;
+	    	if (success)
+	    		listener.getLogger().println("\n\n OpenShiftCreator BUILD STEP EXIT:  resources(s) created");
+			return success;
+		} finally {
+			this.restoreOverridenFields(overrides, listener);
+		}
     	
     }
     
@@ -237,4 +357,3 @@ public class OpenShiftCreator extends Builder implements SimpleBuildStep, Serial
     }
 
 }
-
