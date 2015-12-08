@@ -158,11 +158,11 @@ public class OpenShiftCreator extends Builder implements SimpleBuildStep, Serial
 	// unfortunately a base class would not have access to private fields in this class; could munge our way through
 	// inspecting the methods and try to match field names and methods starting with get/set ... seems problematic;
 	// for now, duplicating this small piece of logic in each build step is the path taken
-	protected HashMap<String,String> inspectBuildEnvAndOverrideFields(AbstractBuild build, TaskListener listener, boolean chatty) {
+	protected HashMap<String,String> inspectBuildEnvAndOverrideFields(AbstractBuild build, Run<?, ?> run, TaskListener listener, boolean chatty) {
 		String className = this.getClass().getName();
 		HashMap<String,String> overridenFields = new HashMap<String,String>();
 		try {
-			EnvVars env = build.getEnvironment(listener);
+			EnvVars env = (build != null ? build.getEnvironment(listener) : run.getEnvironment(listener));
 			if (env == null)
 				return overridenFields;
 			Class<?> c = Class.forName(className);
@@ -220,9 +220,9 @@ public class OpenShiftCreator extends Builder implements SimpleBuildStep, Serial
 		}
 	}
 	
-    protected boolean coreLogic(AbstractBuild build, Launcher launcher, TaskListener listener) {
+    protected boolean coreLogic(AbstractBuild build, Run<?, ?> run, Launcher launcher, TaskListener listener) {
 		boolean chatty = Boolean.parseBoolean(verbose);
-		HashMap<String,String> overrides = inspectBuildEnvAndOverrideFields(build, listener, chatty);
+		HashMap<String,String> overrides = inspectBuildEnvAndOverrideFields(build, run, listener, chatty);
 		try {
 	    	listener.getLogger().println("\n\nBUILD STEP:  OpenShiftImageTagger in perform on namespace " + namespace);
 	    	
@@ -264,12 +264,12 @@ public class OpenShiftCreator extends Builder implements SimpleBuildStep, Serial
 	@Override
 	public void perform(Run<?, ?> run, FilePath workspace, Launcher launcher,
 			TaskListener listener) throws InterruptedException, IOException {
-		coreLogic(null, launcher, listener);
+		coreLogic(null, run, launcher, listener);
 	}
 
 	@Override
     public boolean perform(AbstractBuild build, Launcher launcher, BuildListener listener) {
-		return coreLogic(build, launcher, listener);
+		return coreLogic(build, null, launcher, listener);
 	}
 
     // Overridden for better type safety.
